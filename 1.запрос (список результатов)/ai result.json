@@ -1,0 +1,240 @@
+Отличная детализация! Вы собрали практически все возможные варианты элементов. Вот **полная схема извлечения** с индексами DOM-путей и итоговый JSON.
+
+---
+
+## Схема извлечения данных со страницы поиска Авито
+
+### Уровень страницы (мета-данные)
+
+| Поле | data-marker | Путь (индексы) | Тип |
+|------|-------------|----------------|------|
+| Заголовок страницы | `page-title/text` | `html>body>div#app>...>h1[0]>span` | string |
+| Количество объявлений | `page-title/count` | `html>body>div#app>...>span[0]` | int |
+
+### Уровень карточки объявления
+
+| Поле | data-marker | Fallback селектор | Тип |
+|------|-------------|-------------------|------|
+| **ID** | — | Из `href` (`/\/(\d+)/`) | string |
+| **URL** | `item-title` (href) | `a[itemprop="url"]` | string |
+| **Title** | `item-title` | `a[itemprop="url"]` text | string |
+| **Price** | `item-price-value` | `meta[itemprop="price"]` | int |
+| **PriceCurrency** | — | `meta[itemprop="priceCurrency"]` | string |
+| **PriceList** | — | `.price-list-value-WxG6k` | object[] |
+| **Location** | — | `.geo-pinIcon-GPsqD` parent span | string |
+| **LocationExtra** | — | `.geo-additionalInfo-KGO7g` | string |
+| **RemoteWork** | — | span:contains("удалённо") | bool |
+| **Description** | — | `p[style*="--module-max-lines-size:4"]` | string |
+| **Promoted** | — | span:contains("Продвинуто") | bool |
+| **Category** | — | span:contains("Предложение услуг") | string |
+| **Images** | `slider-image/image-*` | `img[itemprop="image"]` | string[] |
+
+### Уровень продавца
+
+| Поле | data-marker | Fallback | Тип |
+|------|-------------|----------|-----|
+| **SellerName** | — | `a[href*="/brands/"] p`, `a[href*="/user/"] p` | string |
+| **SellerUrl** | — | `a[href*="/brands/"]`, `a[href*="/user/"]` | string |
+| **SellerRating** | `seller-rating/score` | `meta[itemprop="ratingValue"]` | float |
+| **SellerReviews** | `seller-info/summary` | текст с "отзыв" | int |
+| **EntityType** | — | `.styles-wrapper-dIADx span` | enum |
+| **Badges** | `badge-title-*` | `.SnippetBadge-title-NCaUc` | string[] |
+| **Availability** | `iva-item/2750` | `.styles-module-content-M8Kp5` | string |
+| **HasPortfolio** | `iva-item/2889` | текст "Есть портфолио" | bool |
+| **DealProtection** | `iva-item/2933` | текст "Защита сделки" | bool |
+
+---
+
+## Enum для EntityType
+
+| Значение в HTML | `entityType` |
+|-----------------|--------------|
+| Частный исполнитель | `individual` |
+| Частное лицо | `individual` |
+| Компания | `company` |
+| Команда | `team` |
+| ИП | `entrepreneur` |
+| Самозанятый | `self_employed` |
+
+---
+
+## Итоговый JSON (лёгкий парсинг)
+
+```json
+{
+  "meta": {
+    "query": "разработка",
+    "city": "rostov-na-donu",
+    "cityLabel": "Ростов-на-Дону",
+    "localPriority": 0,
+    "totalCount": 21669,
+    "parsedAt": "2026-04-08T12:00:00Z",
+    "itemsCount": 1
+  },
+  "items": [
+    {
+      "id": "2175728035",
+      "url": "https://www.avito.ru/rostov-na-donu/predlozheniya_uslug/proektirovanie_sudov_registratsiya_v_gims._gotovye_2175728035",
+      "title": "Проектирование судов, регистрация в гимс. Готовые",
+      "description": "Предлагаю услуги по проектированию маломерных судов:\n- разработка технической документации для регистрации в Гимс;\n- расчеты остойчивости, непотопляемости, прочности транца и др.;\n- проектирование корпусов лодок и катеров для самостоятельного строи...",
+      "price": {
+        "value": 25000,
+        "currency": "RUB",
+        "formatted": "от 25 000 ₽",
+        "priceList": [
+          {
+            "name": "Услуги диджея",
+            "price": "от 1 500 ₽ за час"
+          }
+        ]
+      },
+      "location": {
+        "district": "р-н Первомайский",
+        "travels": true,
+        "remoteOnly": false,
+        "extra": "выезжает по городу"
+      },
+      "images": [
+        "https://00.img.avito.st/image/1/1.E408oraAv2QqAh1lFtp07DADvWCOFbtkjnLeYI6hvsaJAbt-KgIdZYo..."
+      ],
+      "promoted": true,
+      "category": "Предложение услуг",
+      "seller": {
+        "name": "Виктор",
+        "url": "https://www.avito.ru/brands/i186424161",
+        "rating": 4.9,
+        "reviews": 35,
+        "entityType": "individual",
+        "entityTypeLabel": "Частный исполнитель",
+        "badges": [
+          "Надёжный исполнитель",
+          "Реквизиты проверены",
+          "Документы проверены",
+          "Самозанятый"
+        ],
+        "availability": "Может сегодня",
+        "hasPortfolio": true,
+        "dealProtection": true
+      }
+    }
+  ]
+}
+```
+
+---
+
+## Код для извлечения (с индексами DOM)
+
+```javascript
+function parseSearchPage() {
+    const items = [];
+    const cards = document.querySelectorAll('[data-marker="item"]');
+    
+    // Мета-данные страницы
+    const meta = {
+        query: new URLSearchParams(location.search).get('q'),
+        city: location.pathname.split('/')[1],
+        localPriority: parseInt(new URLSearchParams(location.search).get('localPriority')) || 0,
+        totalCount: parseInt(document.querySelector('[data-marker="page-title/count"]')?.textContent?.replace(/\s/g, '') || '0')
+    };
+    
+    cards.forEach((card, index) => {
+        const item = {};
+        
+        // URL и ID
+        const link = card.querySelector('a[data-marker="item-title"]');
+        if (link) {
+            item.url = link.href;
+            item.id = link.href.match(/\/(\d+)(?:[\/\?]|$)/)?.[1];
+            item.title = link.textContent.trim();
+        }
+        
+        // Цена
+        const priceEl = card.querySelector('[data-marker="item-price-value"]');
+        const priceMeta = card.querySelector('meta[itemprop="price"]');
+        const currencyMeta = card.querySelector('meta[itemprop="priceCurrency"]');
+        item.price = {
+            value: parseInt(priceMeta?.content) || parseInt(priceEl?.textContent?.replace(/[^\d]/g, '')),
+            currency: currencyMeta?.content || 'RUB',
+            formatted: priceEl?.textContent?.trim()
+        };
+        
+        // Прайс-лист
+        const priceListItems = card.querySelectorAll('.price-list-value-WxG6k');
+        if (priceListItems.length) {
+            item.price.priceList = Array.from(priceListItems).map(pli => ({
+                name: pli.querySelector('.price-list-title-wj1z6')?.textContent?.trim(),
+                price: pli.querySelector('.price-list-price-wFpMB')?.textContent?.trim()
+            }));
+        }
+        
+        // Локация
+        const locationSpan = card.querySelector('.geo-pinIcon-GPsqD')?.parentElement;
+        const extraLocation = card.querySelector('.geo-additionalInfo-KGO7g');
+        const remoteSpan = Array.from(card.querySelectorAll('span')).find(s => s.textContent.includes('удалённо'));
+        item.location = {
+            district: locationSpan?.childNodes[0]?.textContent?.trim(),
+            travels: !!extraLocation?.textContent?.includes('выезжает'),
+            remoteOnly: !!remoteSpan,
+            extra: extraLocation?.textContent?.trim()
+        };
+        
+        // Описание
+        const descEl = card.querySelector('p[style*="--module-max-lines-size:4"]');
+        item.description = descEl?.textContent?.trim();
+        
+        // Изображения
+        item.images = Array.from(card.querySelectorAll('[data-marker^="slider-image/image-"] img')).map(img => img.src);
+        
+        // Статусы
+        item.promoted = !!card.querySelector('span')?.textContent?.includes('Продвинуто');
+        item.category = Array.from(card.querySelectorAll('span')).find(s => s.textContent.includes('Предложение услуг'))?.textContent?.trim();
+        
+        // Продавец
+        const sellerLink = card.querySelector('a[href*="/brands/"]') || card.querySelector('a[href*="/user/"]');
+        if (sellerLink) {
+            item.seller = {
+                name: sellerLink.querySelector('p')?.textContent?.trim(),
+                url: sellerLink.href,
+                rating: parseFloat(card.querySelector('[data-marker="seller-rating/score"]')?.textContent?.replace(',', '.') || 
+                         card.querySelector('meta[itemprop="ratingValue"]')?.content),
+                reviews: parseInt(card.querySelector('[data-marker="seller-info/summary"]')?.textContent || '0'),
+                entityType: mapEntityType(card.querySelector('.styles-wrapper-dIADx span')?.textContent),
+                entityTypeLabel: card.querySelector('.styles-wrapper-dIADx span')?.textContent?.trim(),
+                badges: Array.from(card.querySelectorAll('[data-marker^="badge-title-"] .SnippetBadge-title-NCaUc')).map(b => b.textContent.trim()),
+                availability: card.querySelector('[data-marker="iva-item/2750"] .styles-module-content-M8Kp5')?.textContent?.trim(),
+                hasPortfolio: !!card.querySelector('[data-marker="iva-item/2889"]'),
+                dealProtection: !!card.querySelector('[data-marker="iva-item/2933"]')
+            };
+        }
+        
+        items.push(item);
+    });
+    
+    return { meta, items };
+}
+
+function mapEntityType(label) {
+    const map = {
+        'Частный исполнитель': 'individual',
+        'Частное лицо': 'individual',
+        'Компания': 'company',
+        'Команда': 'team',
+        'ИП': 'entrepreneur',
+        'Самозанятый': 'self_employed'
+    };
+    return map[label] || 'unknown';
+}
+```
+
+---
+
+## Сводка data-marker'ов для поиска
+
+| Группа | Маркеры |
+|--------|---------|
+| **Страница** | `page-title/text`, `page-title/count` |
+| **Карточка** | `item`, `item-title`, `item-price`, `item-price-value` |
+| **Изображения** | `slider-image/image-*` |
+| **Продавец** | `seller-rating`, `seller-rating/score`, `seller-info/summary` |
+| **Бейджи** | `badge-title-*`, `iva-item/*` |
